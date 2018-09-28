@@ -1,0 +1,316 @@
+<html>
+
+<head>
+    <title>Neural Guinea Pig</title>
+    <script src="neataptic.js"></script>
+    <style>
+        body {
+            color: white;
+            text-align: center;
+            background: gray;
+            font-family:'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
+            /*font-family: Arial, Helvetica, sans-serif;*/
+        }
+        .challengeCountText {
+            font-size: 10px;
+            color: black;
+            text-align: left;
+            width: 1000px;
+            margin: 0 auto;
+            font-weight: 300;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Click to make Guinea Pig's life harder</h1>
+    <canvas id="canvas" width="1000px" height="400px"></canvas>
+    <div class="challengeCountText">Mr. Guinea Pig has tried this challenge <span id="challengeNumber">0</span> times</div>
+    <h2 id="comment"></h2>
+    <div style="color: #333">Marko's neural network demo using neataptic.js</div>
+    <script>
+        function processOutput(val) {
+            return Math.min(Math.max(val, 0), 1) - 0.5;
+        }
+
+        function hitTest(x, y) {
+            if (x < 0) return true;
+            if (y < SIZE / 2) return true;
+            if (y > 400 - SIZE / 2) return true;
+
+            for (const danger of dangers) {
+                let dx = danger.x - x;
+                let dy = danger.y - y;
+                if (Math.abs(dx) < SIZE && Math.abs(dy) < SIZE) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        class Game {
+            constructor(genome) {
+                this.genome = genome;
+                this.genome.score = 0;
+                this.x = SIZE / 2;
+                this.y = 200;
+                this.maxX = this.x;
+                this.running = true;
+                this.steps = 0;
+                this.score = 0;
+                this.positionHistory = [];
+                this.dead = false;
+                this.oldPositionCount = 0;
+            }
+
+            die() {
+                this.running = false;
+                this.score = Math.sqrt(this.maxX) / 200 + this.positionHistory.length * this.positionHistory.length / 100 /*/ Math.sqrt(this.steps)*/ - this.oldPositionCount / 100;
+                this.dead = true;
+            }
+
+            win() {
+                this.running = false;
+                this.score = 10000000000 / this.steps;
+            }
+
+            step() {
+                if (this.x > this.maxX)
+                    this.maxX = this.x;
+
+                this.steps++;
+                let minDistance = 1;
+
+                if (this.steps > 200) {
+                    return this.die();
+                }
+
+                let hitTestStep = SIZE / 3;
+                const dir = (dx, dy) => {
+                    dx *= hitTestStep;
+                    dy *= hitTestStep;
+                    if (hitTest(this.x + dx, this.y + dy)) {
+                        return 1;
+                    } else if (hitTest(this.x + dx*3, this.y + dy*3)) {
+                        return 0.6;
+                    } else if (hitTest(this.x + dx*5, this.y + dy*5)) {
+                        return 0.3;
+                    } else {
+                        return 0;
+                    }
+                };
+
+                let output = this.genome.activate([
+                    dir(1, 0),
+                    dir(-1, 0),
+                    dir(0, 1),
+                    dir(0, -1),
+                    dir(1, 0.5),
+                    dir(-1, 1),
+                    dir(-1, -1),
+                    dir(1, -0.5)
+                ])
+
+                let marsuSpeed = 15;
+
+                let outX = Math.min()
+                let dx = processOutput(output[0]);
+                let dy = processOutput(output[1]);
+                let dLen = Math.sqrt(dx * dx + dy * dy);
+
+                this.x += dx / dLen * marsuSpeed;
+                this.y += dy / dLen * marsuSpeed;
+
+                let isInOldPos = false;
+                for (const oldPos of this.positionHistory) {
+                    let dx = oldPos.x - this.x;
+                    let dy = oldPos.y - this.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < SIZE*1.1) {
+                        isInOldPos = true;
+                        break;
+                    }
+                }
+                if (isInOldPos) {
+                    this.oldPositionCount++;
+                } else {
+                    this.positionHistory.push({ x: this.x, y: this.y });
+                }
+
+                if (this.x > 1000) this.win();
+
+                if (hitTest(this.x, this.y)) {
+                    this.die();
+                }
+            }
+        }
+
+        let SIZE = 50;
+        let marsuImg = new Image();
+        marsuImg.src = "marsu.png";
+        let dangerImg = new Image();
+        dangerImg.src = "danger.png";
+        let context = canvas.getContext('2d');
+
+        let dangers = [];
+        let marsu = { x: SIZE / 2, y: 200 };
+        let challengeCount = 0;
+
+        canvas.onmousedown = canvas.ontouchstart = (e) => {
+            let x = e.clientX - canvas.offsetLeft;
+            let y = e.clientY - canvas.offsetTop;
+
+            dangers.push({
+                x, y
+            });
+            challengeCount = 0;
+            resetNeat();
+            learnAndPlay();
+        };
+
+        function draw(game) {
+            context.fillStyle = '#ddd';
+            context.fillRect(0, 0, 1000, 400);
+
+            for (const danger of dangers) {
+                context.drawImage(dangerImg, danger.x - SIZE / 2, danger.y - SIZE / 2, SIZE, SIZE);
+            }
+
+            context.drawImage(marsuImg, game.x - SIZE / 2, game.y - SIZE / 2, SIZE, SIZE);
+
+            if (game.dead) {
+                context.strokeStyle = 'red';
+                context.lineWidth = 3;
+                context.beginPath();
+                context.moveTo(game.x - SIZE / 2, game.y - SIZE / 2);
+                context.lineTo(game.x + SIZE / 2, game.y + SIZE / 2);
+                context.moveTo(game.x + SIZE / 2, game.y - SIZE / 2);
+                context.lineTo(game.x - SIZE / 2, game.y + SIZE / 2);
+                context.stroke();
+            }
+        }
+
+        // setInterval(draw, 50);
+
+        let neat;
+        let popsize = 200;
+
+        function resetNeat() {
+            neat = new neataptic.Neat(8, 2, genome => {
+                let game = new Game(genome);
+                while (game.running) {
+                    game.step();
+                }
+                return game.score - genome.nodes.length / 10;
+            }, {
+                    popsize,
+                    elitism: 1,
+                    mutationRate: 0.6,
+                    mutationAmount: 5,
+                }
+            );
+        }
+
+        resetNeat();
+
+        let interval;
+        async function learnAndPlay() {
+            if (interval) {
+                clearInterval(interval);
+            }
+            for (let i = 0; i < 10; i++) {
+                challengeCount += popsize;
+                await neat.evolve();
+            }
+
+            await neat.evaluate();
+
+            let fittest = neat.getFittest();
+            let game = new Game(fittest);
+            window.g = game;
+
+            challengeNumber.textContent = challengeCount;
+
+            interval = setInterval(() => {
+                game.step();
+                draw(game);
+
+                // timeout because we want to wait for draw
+                setTimeout(() => {
+                    function makeComment(alternatives) {
+                        comment.textContent = `"${alternatives[alternatives.length * Math.random() | 0]}" -Guinea Pig`
+                    }
+                    if (!game.running) {
+                        if (game.dead) {
+                            if (dangers.length === 0) {
+                                makeComment([
+                                    "Now that's embarassing..",
+                                    'Where did that come from?',
+                                    'Wall out of nowhere!',
+                                    'Ouch, I hit the wall.',
+                                ]);
+                            } else if (dangers.length < 15) {
+                                makeComment([
+                                    'Oops',
+                                    'I can make it...',
+                                    'I will make it soon',
+                                    'Ouch, better luck next time',
+                                    'Yikes!',
+                                    'Darn',
+                                    'Now this is a challenge'
+                                ]);
+                            } else {
+                                makeComment([
+                                    'Did you have to make it so hard?',
+                                    'So many dangers..',
+                                    "C'mon!!",
+                                    "I'm getting annoyed",
+                                    "This isn't fair!",
+                                    "Noooo!!!",
+                                ]);
+                            }
+                        } else {
+                            if (dangers.length === 0) {
+                                makeComment([
+                                    'Yey!',
+                                    'Easy peasy',
+                                    'Challenge me.',
+                                    'Add some challenges, please.',
+                                    'Too easy.',
+                                    'Could you make this harder?',
+                                ]);
+                            } else if (dangers.length < 15) {
+                                makeComment([
+                                    "I've made it!",
+                                    "Haha. Is that everything you've got?",
+                                    "Put some more!",
+                                    "I like this!",
+                                    "Yey!",
+                                    "I could take some more",
+                                    "Harder, please!"
+                                ]);
+                            } else {
+                                makeComment([
+                                    'WOW! I passed all of them!',
+                                    'So many dangers.. BEHIND ME!',
+                                    'That felt so good.',
+                                    'My life is complete!',
+                                    'OH YES!',
+                                    'Now that was something.'
+                                ]);
+                            }
+                        }
+                        learnAndPlay();
+                    } else {
+                        challengeCount += popsize;
+                        neat.evolve();
+                    }
+                }, 0);
+            }, 40);
+        }
+
+        learnAndPlay();
+
+    </script>
+</body>
+
+</html>
